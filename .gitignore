@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+output
+cmake-build-debug
+build
+carbin

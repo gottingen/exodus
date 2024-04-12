@@ -1,0 +1,9 @@
+{
+    "display_name": "calc",
+    "argv": [
+        "@CMAKE_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/hcalc",
+        "-f",
+        "{connection_file}"
+    ],
+    "language": ""
+}

@@ -39,125 +39,125 @@ using std::string;
 namespace nl = nlohmann;
 namespace hercules {
 
-HerculesJupyter::HerculesJupyter(const std::string &argv0,
-                           const std::vector<std::string> &plugins)
-    : argv0(argv0), plugins(plugins) {}
+    HerculesJupyter::HerculesJupyter(const std::string &argv0,
+                                     const std::vector<std::string> &plugins)
+            : argv0(argv0), plugins(plugins) {}
 
-nl::json HerculesJupyter::execute_request_impl(int execution_counter, const string &code,
-                                            bool silent, bool store_history,
-                                            nl::json user_expressions,
-                                            bool allow_stdin) {
-  LOG("[hercules-jupyter] execute_request_impl");
-  auto result = jit->execute(code);
-  string failed;
-  llvm::handleAllErrors(
-      result.takeError(),
-      [&](const hercules::error::ParserErrorInfo &e) {
-        std::vector<string> backtrace;
-        for (auto &msg : e)
-          for (auto &s : msg)
-            backtrace.push_back(s.getMessage());
-        string err = backtrace[0];
-        backtrace.erase(backtrace.begin());
-        failed = fmt::format("Compile error: {}\nBacktrace:\n{}", err,
-                             ast::join(backtrace, "  \n"));
-      },
-      [&](const hercules::error::RuntimeErrorInfo &e) {
-        auto backtrace = e.getBacktrace();
-        failed = fmt::format("Runtime error: {}\nBacktrace:\n{}", e.getMessage(),
-                             ast::join(backtrace, "  \n"));
-      });
-  if (failed.empty()) {
-    std::string out = *result;
-    nl::json pub_data;
-    using std::string_literals::operator""s;
-    std::string herculesMimeMagic = "\x00\x00__hercules/mime__\x00"s;
-    if (ast::startswith(out, herculesMimeMagic)) {
-      std::string mime = "";
-      int i = herculesMimeMagic.size();
-      for (; i < out.size() && out[i]; i++)
-        mime += out[i];
-      if (i < out.size() && !out[i]) {
-        i += 1;
-      } else {
-        mime = "text/plain";
-        i = 0;
-      }
-      pub_data[mime] = out.substr(i);
-      LOG("> {}: {}", mime, out.substr(i));
-    } else {
-      pub_data["text/plain"] = out;
+    nl::json HerculesJupyter::execute_request_impl(int execution_counter, const string &code,
+                                                   bool silent, bool store_history,
+                                                   nl::json user_expressions,
+                                                   bool allow_stdin) {
+        LOG("[hercules-jupyter] execute_request_impl");
+        auto result = jit->execute(code);
+        string failed;
+        llvm::handleAllErrors(
+                result.takeError(),
+                [&](const hercules::error::ParserErrorInfo &e) {
+                    std::vector<string> backtrace;
+                    for (auto &msg: e)
+                        for (auto &s: msg)
+                            backtrace.push_back(s.getMessage());
+                    string err = backtrace[0];
+                    backtrace.erase(backtrace.begin());
+                    failed = fmt::format("Compile error: {}\nBacktrace:\n{}", err,
+                                         ast::join(backtrace, "  \n"));
+                },
+                [&](const hercules::error::RuntimeErrorInfo &e) {
+                    auto backtrace = e.getBacktrace();
+                    failed = fmt::format("Runtime error: {}\nBacktrace:\n{}", e.getMessage(),
+                                         ast::join(backtrace, "  \n"));
+                });
+        if (failed.empty()) {
+            std::string out = *result;
+            nl::json pub_data;
+            using std::string_literals::operator ""s;
+            std::string herculesMimeMagic = "\x00\x00__hercules/mime__\x00"s;
+            if (ast::startswith(out, herculesMimeMagic)) {
+                std::string mime = "";
+                int i = herculesMimeMagic.size();
+                for (; i < out.size() && out[i]; i++)
+                    mime += out[i];
+                if (i < out.size() && !out[i]) {
+                    i += 1;
+                } else {
+                    mime = "text/plain";
+                    i = 0;
+                }
+                pub_data[mime] = out.substr(i);
+                LOG("> {}: {}", mime, out.substr(i));
+            } else {
+                pub_data["text/plain"] = out;
+            }
+            if (!out.empty())
+                publish_execution_result(execution_counter, move(pub_data), nl::json::object());
+            return nl::json{{"status",           "ok"},
+                            {"payload",          nl::json::array()},
+                            {"user_expressions", nl::json::object()}};
+        } else {
+            publish_stream("stderr", failed);
+            return nl::json{{"status", "error"}};
+        }
     }
-    if (!out.empty())
-      publish_execution_result(execution_counter, move(pub_data), nl::json::object());
-    return nl::json{{"status", "ok"},
-                    {"payload", nl::json::array()},
-                    {"user_expressions", nl::json::object()}};
-  } else {
-    publish_stream("stderr", failed);
-    return nl::json{{"status", "error"}};
-  }
-}
 
-void HerculesJupyter::configure_impl() {
-  jit = std::make_unique<hercules::jit::JIT>(argv0, "jupyter");
-  jit->getCompiler()->getLLVMVisitor()->setCapture();
+    void HerculesJupyter::configure_impl() {
+        jit = std::make_unique<hercules::jit::JIT>(argv0, "jupyter");
+        jit->getCompiler()->getLLVMVisitor()->setCapture();
 
-  for (const auto &plugin : plugins) {
-    // TODO: error handling on plugin init
-    bool failed = false;
-    llvm::handleAllErrors(jit->getCompiler()->load(plugin),
-                          [&failed](const hercules::error::PluginErrorInfo &e) {
-                            hercules::compilationError(e.getMessage(), /*file=*/"",
-                                                    /*line=*/0, /*col=*/0,
-                                                    /*terminate=*/false);
-                            failed = true;
-                          });
-  }
-  llvm::cantFail(jit->init());
-}
+        for (const auto &plugin: plugins) {
+            // TODO: error handling on plugin init
+            bool failed = false;
+            llvm::handleAllErrors(jit->getCompiler()->load(plugin),
+                                  [&failed](const hercules::error::PluginErrorInfo &e) {
+                                      hercules::compilationError(e.getMessage(), /*file=*/"",
+                                              /*line=*/0, /*col=*/0,
+                                              /*terminate=*/false);
+                                      failed = true;
+                                  });
+        }
+        llvm::cantFail(jit->init());
+    }
 
-nl::json HerculesJupyter::complete_request_impl(const string &code, int cursor_pos) {
-  LOG("[hercules-jupyter] complete_request_impl");
-  return nl::json{{"status", "ok"}};
-}
+    nl::json HerculesJupyter::complete_request_impl(const string &code, int cursor_pos) {
+        LOG("[hercules-jupyter] complete_request_impl");
+        return nl::json{{"status", "ok"}};
+    }
 
-nl::json HerculesJupyter::inspect_request_impl(const string &code, int cursor_pos,
-                                            int detail_level) {
-  LOG("[hercules-jupyter] inspect_request_impl");
-  return nl::json{{"status", "ok"}};
-}
+    nl::json HerculesJupyter::inspect_request_impl(const string &code, int cursor_pos,
+                                                   int detail_level) {
+        LOG("[hercules-jupyter] inspect_request_impl");
+        return nl::json{{"status", "ok"}};
+    }
 
-nl::json HerculesJupyter::is_complete_request_impl(const string &code) {
-  LOG("[hercules-jupyter] is_complete_request_impl");
-  return nl::json{{"status", "complete"}};
-}
+    nl::json HerculesJupyter::is_complete_request_impl(const string &code) {
+        LOG("[hercules-jupyter] is_complete_request_impl");
+        return nl::json{{"status", "complete"}};
+    }
 
-nl::json HerculesJupyter::kernel_info_request_impl() {
-  LOG("[hercules-jupyter] kernel_info_request_impl");
-  return dwarf::create_info_reply("", "hercules_kernel", HERCULES_VERSION, "python", "3.7",
-                                 "text/x-python", ".hs", "python", "", "",
-                                 "Hercules Kernel");
-}
+    nl::json HerculesJupyter::kernel_info_request_impl() {
+        LOG("[hercules-jupyter] kernel_info_request_impl");
+        return dwarf::create_info_reply("", "hercules_kernel", HERCULES_VERSION, "python", "3.7",
+                                        "text/x-python", ".hs", "python", "", "",
+                                        "Hercules Kernel");
+    }
 
-void HerculesJupyter::shutdown_request_impl() {
-  LOG("[hercules-jupyter] shutdown_request_impl");
-}
+    void HerculesJupyter::shutdown_request_impl() {
+        LOG("[hercules-jupyter] shutdown_request_impl");
+    }
 
-int startJupyterKernel(const std::string &argv0,
-                       const std::vector<std::string> &plugins,
-                       const std::string &configPath) {
-    dwarf::Configuration config = dwarf::load_configuration(configPath);
+    int startJupyterKernel(const std::string &argv0,
+                           const std::vector<std::string> &plugins,
+                           const std::string &configPath) {
+        dwarf::Configuration config = dwarf::load_configuration(configPath);
 
-  auto context = dwarf::make_context<zmq::context_t>();
+        auto context = dwarf::make_context<zmq::context_t>();
 
-  LOG("[hercules-jupyter] startJupyterKernel");
-  auto interpreter = std::make_unique<HerculesJupyter>(argv0, plugins);
-    dwarf::Kernel kernel(config, dwarf::get_user_name(), move(context), move(interpreter),
-                         dwarf::make_xserver_zmq);
-  kernel.start();
+        LOG("[hercules-jupyter] startJupyterKernel");
+        auto interpreter = std::make_unique<HerculesJupyter>(argv0, plugins);
+        dwarf::Kernel kernel(config, dwarf::get_user_name(), move(context), move(interpreter),
+                             dwarf::make_xserver_zmq);
+        kernel.start();
 
-  return 0;
-}
+        return 0;
+    }
 
 } // namespace hercules

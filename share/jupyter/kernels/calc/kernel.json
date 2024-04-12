@@ -1,9 +1,0 @@
-{
-    "display_name": "calc",
-    "argv": [
-        "/home/jeff/.local/bin/hcalc",
-        "-f",
-        "{connection_file}"
-    ],
-    "language": ""
-}
